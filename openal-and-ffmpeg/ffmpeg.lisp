@@ -126,6 +126,7 @@
 
 
 (defun init-demux (demuxer music sound-data)
+  (declare (optimize (debug 3)))
   (with-slots ((actual-sample-rate rate)
 	       bytes-per-sample
 	       channels
@@ -176,7 +177,8 @@
 	  (cffi:with-foreign-slots ((cl-ffmpeg-bindings::channels
 				     cl-ffmpeg-bindings::channel_layout
 				     cl-ffmpeg-bindings::sample_rate
-				     cl-ffmpeg-bindings::sample_fmt) codec
+				     cl-ffmpeg-bindings::sample_fmt)
+				    codec
 				    (:struct cl-ffmpeg-bindings::|AVCodecContext|))
 	    (setf actual-sample-rate cl-ffmpeg-bindings::sample_rate)
 	    (setf bytes-per-sample (cl-ffmpeg-bindings::av-get-bytes-per-sample
