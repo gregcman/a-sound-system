@@ -389,7 +389,8 @@
   (inter_quant_bias :int);;;;fine here tooo
   (slice_flags :int)
   
-  #+darwin(xvmc_acceleration :int)
+  ;;#+darwin
+  (xvmc_acceleration :int)
   
   (mb_decision :int)
   (intra_matrix :pointer)
