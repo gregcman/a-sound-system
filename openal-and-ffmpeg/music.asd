@@ -5,7 +5,7 @@
 	       :utility
 	       :musical-binaries
 	       :ffmpeg-bindings
-	       :singleton-lparallel
+	       :lparallel
 	       :float-features)
     :serial t
     :components 
