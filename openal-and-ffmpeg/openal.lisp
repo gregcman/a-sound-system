@@ -93,24 +93,23 @@
 	((or pathname string)
 	 (when (pathnamep sound)
 	   (setf sound (namestring sound)))
-	 (with-lparallel-sound-kernel
-	     (lparallel:submit-task
-	      *task*
-	      (let ((format *format*))
-		(lambda (filename x y z)
-		  (let ((*format* format))
-		    (multiple-value-bind (datobj source) (load-file filename)
-		      (when datobj
-			(%al:source-3f source :position
-				       (floatify x)
-				       (floatify y)
-				       (floatify z))
-			(al:source source :velocity (load-time-value (vector 0.0 0.0 0.0)))
-			(al:source source :gain volume)
-			(al:source source :pitch pitch)
-			(push-sound datobj)
-			(values datobj source))))))
-	      sound x y z)))
+	 (lparallel:submit-task
+	  *task*
+	  (let ((format *format*))
+	    (lambda (filename x y z)
+	      (let ((*format* format))
+		(multiple-value-bind (datobj source) (load-file filename)
+		  (when datobj
+		    (%al:source-3f source :position
+				   (floatify x)
+				   (floatify y)
+				   (floatify z))
+		    (al:source source :velocity (load-time-value (vector 0.0 0.0 0.0)))
+		    (al:source source :gain volume)
+		    (al:source source :pitch pitch)
+		    (push-sound datobj)
+		    (values datobj source))))))
+	  sound x y z))
 	(preloaded-music (play-preloaded-at sound x y z pitch volume))))))
 
 (defparameter *datobj* nil)
