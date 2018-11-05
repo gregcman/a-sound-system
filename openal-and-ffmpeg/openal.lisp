@@ -69,29 +69,31 @@
 
 (defparameter *task* (lparallel:make-channel))
 (defun play-at (sound x y z pitch volume)
-  (when (> 128 (total-handles))
-    (typecase sound
-      ((or pathname string)
-       (when (pathnamep sound)
-	 (setf sound (namestring sound)))
-       (lparallel:submit-task
-	*task*
-	(let ((format *format*))
-	  (lambda (filename x y z)
-	    (let ((*format* format))
-	      (multiple-value-bind (datobj source) (load-file filename)
-		(when datobj
-		  (%al:source-3f source :position
-				 (floatify x)
-				 (floatify y)
-				 (floatify z))
-		  (al:source source :velocity (load-time-value (vector 0.0 0.0 0.0)))
-		  (al:source source :gain volume)
-		  (al:source source :pitch pitch)
-		  (push-sound datobj)
-		  (values datobj source))))))
-	sound x y z))
-      (preloaded-music (play-preloaded-at sound x y z pitch volume)))))
+  (bad-floats:with-float-traps-masked
+    (really-start)
+    (when (> 128 (total-handles))
+      (typecase sound
+	((or pathname string)
+	 (when (pathnamep sound)
+	   (setf sound (namestring sound)))
+	 (lparallel:submit-task
+	  *task*
+	  (let ((format *format*))
+	    (lambda (filename x y z)
+	      (let ((*format* format))
+		(multiple-value-bind (datobj source) (load-file filename)
+		  (when datobj
+		    (%al:source-3f source :position
+				   (floatify x)
+				   (floatify y)
+				   (floatify z))
+		    (al:source source :velocity (load-time-value (vector 0.0 0.0 0.0)))
+		    (al:source source :gain volume)
+		    (al:source source :pitch pitch)
+		    (push-sound datobj)
+		    (values datobj source))))))
+	  sound x y z))
+	(preloaded-music (play-preloaded-at sound x y z pitch volume))))))
 
 (defparameter *datobj* nil)
 ;;do not switch source formats!!!!
@@ -144,12 +146,12 @@
 	    (let ((flag nil))
 	      (bordeaux-threads:with-lock-held (*datobjs-lock*)
 		(dohash (obj dummy) *datobjs*
-		  (declare (ignorable dummy))
-		  (multiple-value-bind (destructible?) (update-obj obj) ;;finished or cancelled
-		    (if destructible?
-			(progn (destroy-obj obj)
-			       (remhash obj *datobjs*))
-			(setf flag t))))) ;;still playing
+			(declare (ignorable dummy))
+			(multiple-value-bind (destructible?) (update-obj obj) ;;finished or cancelled
+			  (if destructible?
+			      (progn (destroy-obj obj)
+				     (remhash obj *datobjs*))
+			      (setf flag t))))) ;;still playing
 	      (when flag
 		(sleep 0.1)
 		(go repeat)))))
@@ -451,9 +453,10 @@
   (setf *al-context* nil))
 (defparameter *al-context* nil)
 (defun really-start ()
-  (unless *al-context*
-    (start-al)
-    (setf *al-context* (cons "OpenAL context" nil))))
+  (bad-floats:with-float-traps-masked
+    (unless *al-context*
+      (start-al)
+      (setf *al-context* (cons "OpenAL context" nil)))))
 
 (defun restart-al ()
   (destroy-al)

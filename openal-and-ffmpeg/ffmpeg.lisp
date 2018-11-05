@@ -180,6 +180,11 @@
 				     cl-ffmpeg-bindings::sample_fmt)
 				    codec
 				    (:struct cl-ffmpeg-bindings::|AVCodecContext|))
+	    #+nil
+	    (print (list (print cl-ffmpeg-bindings::channels)
+			 (print cl-ffmpeg-bindings::channel_layout)
+			 (print cl-ffmpeg-bindings::sample_rate)
+			 (print cl-ffmpeg-bindings::sample_fmt)))
 	    (setf actual-sample-rate cl-ffmpeg-bindings::sample_rate)
 	    (setf bytes-per-sample (cl-ffmpeg-bindings::av-get-bytes-per-sample
 				    cl-ffmpeg-bindings::sample_fmt))

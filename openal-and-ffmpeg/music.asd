@@ -3,8 +3,10 @@
 	       :cl-alc
 	       :bordeaux-threads
 	       :utility
+	       :musical-binaries
 	       :ffmpeg-bindings
-	       :singleton-lparallel)
+	       :singleton-lparallel
+	       :bad-floats)
     :serial t
     :components 
     ((:file "ffmpeg")
