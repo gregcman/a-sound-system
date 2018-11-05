@@ -1,5 +1,4 @@
 (asdf:defsystem #:musical-binaries
-  :depends-on (:cffi
-	       :filesystem-util)
+  :depends-on (:cffi)
     :components 
     ((:file "musical-binaries")))

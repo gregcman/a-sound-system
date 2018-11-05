@@ -1,5 +1,7 @@
 (defpackage :cl-ffmpeg
-  (:use :cl :cffi :utility :cl-ffmpeg-bindings))
+  (:use :cl
+	:cffi
+	:cl-ffmpeg-bindings))
 
 (in-package :cl-ffmpeg)
 
@@ -87,8 +89,8 @@
 	  demuxer nil)))
 
 (defmacro %get-sound-buff ((rawdata samples channels audio-format rate) music-data &body body)
-  (with-gensyms (demuxer sound packet format codec frame flag)
-    (once-only (music-data)
+  (alexandria:with-gensyms (demuxer sound packet format codec frame flag)
+    (alexandria:once-only (music-data)
       `(let ((,demuxer (slot-value ,music-data 'demuxer))
 	     (,sound (slot-value ,music-data 'sound))
 	     (,packet (slot-value ,music-data 'packet)))

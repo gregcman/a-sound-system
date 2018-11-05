@@ -1,9 +1,9 @@
 (defpackage #:musical-binaries
-  (:use :cl
-	:filesystem-util))
+  (:use :cl))
 (in-package :musical-binaries)
 
-(defparameter *binaries-directory* (this-directory))
+(defparameter *binaries-directory*
+  (asdf:system-source-directory :musical-binaries))
 
 (defparameter *folder*
   '(#+darwin

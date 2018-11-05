@@ -1,5 +1,6 @@
 (defpackage #:music
-  (:use #:cl #:utility)
+  (:use #:cl
+	#:iterate)
   (:import-from
    #:cl-ffmpeg
    #:rate
@@ -21,6 +22,17 @@
 (defmacro iosub (&body body)
   `(subprocess (*standard-output* *standard-input* *terminal-io*)
      ,@body))
+
+(defmacro floatify (x)
+  `(coerce ,x 'single-float))
+
+(defmacro etouq (&body body)
+  (let ((var (gensym)))
+    `(macrolet ((,var () ,@body))
+       (,var))))
+
+(defmacro clamp (min max x)
+  `(max ,min (min ,max ,x)))
 
 (defparameter *format* (or :mono8
 			   :mono16
@@ -67,12 +79,12 @@
 					;	  (push buf *free-buffers*)
 	)))
 
-(defparameter *lparallel-kernel* (lparallel:make-kernel 1 :name "sound"))
+(defvar *lparallel-kernel* (lparallel:make-kernel 1 :name "sound"))
 (defmacro with-lparallel-sound-kernel (&body body)
   `(let ((lparallel:*kernel* *lparallel-kernel*))
      ,@body))
 (defparameter *task* (with-lparallel-sound-kernel
-			 (lparallel:make-channel)))
+		       (lparallel:make-channel)))
 (defun play-at (sound x y z pitch volume)
   (float-features:with-float-traps-masked t
     (really-start)
@@ -151,13 +163,13 @@
 	  (unless *stop*
 	    (let ((flag nil))
 	      (bordeaux-threads:with-lock-held (*datobjs-lock*)
-		(dohash (obj dummy) *datobjs*
-			(declare (ignorable dummy))
-			(multiple-value-bind (destructible?) (update-obj obj) ;;finished or cancelled
-			  (if destructible?
-			      (progn (destroy-obj obj)
-				     (remhash obj *datobjs*))
-			      (setf flag t))))) ;;still playing
+		(iterate (for (obj dummy) in-hashtable *datobjs*)
+			 (declare (ignorable dummy))
+			 (multiple-value-bind (destructible?) (update-obj obj) ;;finished or cancelled
+			   (if destructible?
+			       (progn (destroy-obj obj)
+				      (remhash obj *datobjs*))
+			       (setf flag t))))) ;;still playing
 	      (when flag
 		(sleep 0.1)
 		(go repeat)))))
@@ -187,9 +199,9 @@
 
 (defun cleanup-poller ()
   (bordeaux-threads:with-lock-held (*datobjs-lock*)
-    (dohash (k v) *datobjs*
-      (declare (ignore v))
-      (destroy-obj k))
+    (iterate (for (k v) in-hashtable *datobjs*)
+	     (declare (ignore v))
+	     (destroy-obj k))
     (clrhash *datobjs*)
     (setf *datobj* nil)
 
@@ -351,12 +363,12 @@
       (values time bufs))))
 
 (defun free-buffers-hash (hash)
-  ;(bordeaux-threads:with-lock-held (*free-buffers-lock*))
-  (dohash (k v) hash
-    (declare (ignore v))
-    (delete-one-buffer k)
-					;      (push k *free-buffers*)
-    )
+  ;;(bordeaux-threads:with-lock-held (*free-buffers-lock*))
+  (iterate (for (k v) in-hashtable hash)
+	   (declare (ignore v))
+	   (delete-one-buffer k)
+	   ;; (push k *free-buffers*)
+	   )
   (clrhash hash))
 
 #+nil ;;;sources and buffers share namespace?
@@ -453,7 +465,7 @@
 (defun destroy-al ()
   (close-context)
   (close-device)
-  (setf *free-buffers* nil)
+  ;;(setf *free-buffers* nil)
   (clrhash *datobjs*)
   (cleanup-poller)
   (setf *al-context* nil))
