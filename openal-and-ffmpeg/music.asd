@@ -6,7 +6,7 @@
 	       :musical-binaries
 	       :ffmpeg-bindings
 	       :singleton-lparallel
-	       :bad-floats)
+	       :float-features)
     :serial t
     :components 
     ((:file "ffmpeg")

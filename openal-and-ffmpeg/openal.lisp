@@ -69,7 +69,7 @@
 
 (defparameter *task* (lparallel:make-channel))
 (defun play-at (sound x y z pitch volume)
-  (bad-floats:with-float-traps-masked
+  (float-features:with-float-traps-masked t
     (really-start)
     (when (> 128 (total-handles))
       (typecase sound
@@ -453,7 +453,7 @@
   (setf *al-context* nil))
 (defparameter *al-context* nil)
 (defun really-start ()
-  (bad-floats:with-float-traps-masked
+  (float-features:with-float-traps-masked t
     (unless *al-context*
       (start-al)
       (setf *al-context* (cons "OpenAL context" nil)))))
