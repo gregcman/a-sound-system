@@ -4,6 +4,8 @@
 	       :bordeaux-threads
 	       :musical-binaries
 	       :ffmpeg-bindings
+	       :bodge-sndfile
+	       :sndfile-blob
 	       :iterate
 	       :lparallel
 	       :float-features)

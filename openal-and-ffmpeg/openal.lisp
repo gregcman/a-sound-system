@@ -48,8 +48,6 @@
       (al:get-source (slot-value datobj 'source) :source-state)))
 
 (defgeneric free (obj))
-(defmethod free ((obj cl-ffmpeg::music-stuff))
-  (cl-ffmpeg::free-music-stuff obj))
 
 (defun free-datobj (&optional (datobj *datobj*))
   (with-slots (source used-buffers data time-remaining) datobj
@@ -112,7 +110,7 @@
 
 ;;;;FIXME::ripped from lparallel/utils
 (defun unsplice (form)
-  (if form (list form) nil))
+  )
 (defmacro unwind-protect/ext (&key prepare main cleanup abort)
   "Extended `unwind-protect'.
 
@@ -123,7 +121,7 @@
 "
   (alexandria::with-gensyms (finishedp)
     `(progn
-       ,@(unsplice prepare)
+       ,@(if prepare (list prepare) nil)
        ,(cond ((and main cleanup abort)
                `(let ((,finishedp nil))
                   (declare (type boolean ,finishedp))
@@ -157,6 +155,8 @@
   ((info :initform nil)
    (handle :initform nil)
    (sf-file :initform nil)))
+(defmethod free ((obj sndfile-stuff))
+  (destroy-sndfile obj))
 
 (defun create-sndfile (&optional (path #P"/home/imac/.minecraft/resources/sound/step/grass1.ogg"))
   (let ((stuff (make-instance 'sndfile-stuff))
@@ -198,6 +198,7 @@
     (%sndfile:close handle)
     (claw:free info)))
 
+#+nil
 (defun sndfile (&optional (path #P"/home/imac/.minecraft/resources/sound/step/grass1.ogg"))
   
   (sndfile::%catch-sound-errors (handle)
@@ -210,23 +211,13 @@
 (defparameter *datobj* nil)
 ;;do not switch source formats!!!!
 (defun load-file (music-file)
-  #+nil
-  (let ((ffmpeg-stuff (cl-ffmpeg::init-music-stuff music-file)))
-    (when ffmpeg-stuff
+  (multiple-value-bind (sndfile existsp) (create-sndfile (namestring music-file))
+    (when existsp
       (let ((datobj (make-instance 'datobj)))
 	(setf *datobj* datobj)
 	(with-slots (source data) datobj
 	  (setf source (al:gen-source))	
-	  (setf data ffmpeg-stuff)
-	  (values datobj
-		  source)))))
-  (let ((ffmpeg-stuff (%sndfile:open (namestring path) %sndfile:+m-read+ sound-info)))
-    (when ffmpeg-stuff
-      (let ((datobj (make-instance 'datobj)))
-	(setf *datobj* datobj)
-	(with-slots (source data) datobj
-	  (setf source (al:gen-source))	
-	  (setf data ffmpeg-stuff)
+	  (setf data sndfile)
 	  (values datobj
 		  source))))))
 (defun play (&optional (datobj *datobj*))
@@ -323,13 +314,11 @@
 	       `(return-from exit ,x)))
     (block exit
       (with-slots (status time-remaining (format playback) (music data)) datobj
-	(let* ((rate (slot-value 
-		      (slot-value 
-		       music
-		       'cl-ffmpeg::sound)
-		      'cl-ffmpeg::rate))
-	       (threshold 10.0)
+	(let* ((rate
+		(sndfile:sound-sample-rate (slot-value music 'sf-file)))
+	       (threshold 0.0)
 	       (target 10.0))
+	  #+nil
 	  (when (not rate)
 	    (setf status 'aborted)
 	    (exit 'aborted))
@@ -340,93 +329,75 @@
 	     (when (>= (* rate threshold) time-remaining)
 	       (let ((target-samples (* rate target)))
 		 (setf
-		  status 
-		  (cl-ffmpeg::%get-sound-buff (data samples channels audio-format rate) music
-		    (flet ((conv (arr)
-			     (multiple-value-bind (pcm playsize)
-				 (convert
-				  channels
-				  data
-				  samples
-				  audio-format
-				  format
-				  arr)
-			       (let ((buffer (get-buffer)))
-				 (al:buffer-data buffer format pcm playsize rate)
-				 (source-queue-buffer datobj buffer)))))	      
-		      (let ((arrcount (ecase format
-					((:stereo8 :stereo16) (* samples 2))
-					((:mono8 :mono16) samples))))
-			(ecase format
-			  ((:mono8 :stereo8)
-			   (cffi:with-foreign-object (arr :uint8 arrcount)
-			     (conv arr)))
-			  ((:mono16 :stereo16)
-			   (cffi:with-foreign-object (arr :int16 arrcount)
-			     (conv arr))))))
-		    (when (eq status 'aborted)
-		      (return 'aborted))
-		    (decf target-samples samples)
-		    (when (>= 0 target-samples)
-		      (return nil)))))
+		  status
+		  (block nil
+		    (let ((file (slot-value music 'sf-file)))
+		      (let* ((channels (sndfile:sound-channels file))
+			     (inttarget-samples (floor target-samples))
+			     (buf-length (* channels inttarget-samples))
+			     (audio-format :s32
+			       ))
+			(cffi:with-foreign-object 
+			 (what :int buf-length)
+			 (let ((samples
+				(/ (%sndfile:read-short
+				    (sndfile::sound-handle file)
+				    what					     
+				    inttarget-samples)
+				   channels)))
+			   (if (zerop samples)
+			       ;;its finished, returning t means finish for some reason
+			       (return t)
+			       ;;otherwise, send the samples to openal
+			       (flet ((conv (arr)
+					(cffi:with-foreign-object
+					 (hack :pointer channels) ;leftover from ffmpeg API
+					 ;;FIXME?
+
+					 ;;#+nil
+					 (dotimes (channel-num channels)
+					   (setf (cffi:mem-aref hack :pointer channel-num)
+						 ;;FIXME:: its not planar, so what's the
+						 ;;point of more than one channel?
+						 (cffi:mem-aptr what :int
+								(* channel-num
+								   samples))))
+					 
+					 (multiple-value-bind (pcm playsize)
+					     (convert
+					      channels
+					      hack
+					      samples
+					      audio-format
+					      format
+					      arr)
+					   (let ((buffer (get-buffer)))
+					     (al:buffer-data buffer format pcm playsize rate)
+					     (source-queue-buffer datobj buffer))))))	      
+				 (let ((arrcount (ecase format
+						   ((:stereo8 :stereo16) (* samples 2))
+						   ((:mono8 :mono16) samples))))
+				   (ecase format
+				     ((:mono8 :stereo8)
+				      (cffi:with-foreign-object (arr :uint8 arrcount)
+								(conv arr)))
+				     ((:mono16 :stereo16)
+				      (cffi:with-foreign-object (arr :int16 arrcount)
+								(conv arr)))))))
+			   (when (eq status 'aborted)
+			     (return 'aborted))
+			   (decf target-samples samples)
+			   (when (>= 0 target-samples)
+			     (return nil)))))))))
 	       (when
 		   (eq status nil)
 		 (go move)))))))))
+
 
 (defclass preloaded-music ()
   ((buffers :initform nil)
    (complete :initform nil)
    (info :initform nil)))
-
-(defun load-all (file &optional (format *format*))
-  (when (pathnamep file)
-    (setf file (namestring file)))
-  (let ((music nil))
-    (unwind-protect
-	 (progn
-	   (setf music (cl-ffmpeg::init-music-stuff file))
-	   (let ((rate (slot-value 
-			(slot-value 
-			 music
-			 'cl-ffmpeg::sound)
-			'cl-ffmpeg::rate))
-		 (sound-buffers ())
-		 (completed? nil))
-	     (when (not rate)
-	       (return-from load-all (values nil nil)))
-	     (when
-		 (cl-ffmpeg::%get-sound-buff (data samples channels audio-format rate) music
-		   (flet ((conv (arr)
-			    (multiple-value-bind (pcm playsize)
-				(convert
-				 channels
-				 data
-				 samples
-				 audio-format
-				 format
-				 arr)
-			      (let ((buffer (get-buffer)))
-				(al:buffer-data buffer format pcm playsize rate)
-				(push buffer sound-buffers)))))
-		     (let ((arrcount (ecase format
-				       ((:stereo8 :stereo16) (* samples 2))
-				       ((:mono8 :mono16) samples))))
-		       (ecase format
-			 ((:mono8 :stereo8)
-			  (cffi:with-foreign-object (arr :uint8 arrcount)
-			    (conv arr)))
-			 ((:mono16 :stereo16)
-			  (cffi:with-foreign-object (arr :int16 arrcount)
-			    (conv arr)))))))
-	       (setf completed? t))
-	     (let ((inst
-		    (make-instance 'preloaded-music)))
-	       (with-slots (buffers complete info) inst
-		 (setf buffers (coerce (nreverse sound-buffers) 'vector)
-		       complete completed?
-		       info (slot-value music 'cl-ffmpeg::sound)))
-	       inst)))
-      (cl-ffmpeg::free-music-stuff music))))
 
 (defun play-preloaded-at (preloaded x y z pitch volume)
   (let ((source (al:gen-source)))
@@ -874,7 +845,8 @@
   arr)
 
 (defun array->uint8 (buffer format newlen arr)
-  (declare (optimize (speed 3) (safety 0)))
+  ;;(declare (optimize (speed 3) (safety 0)))
+  (declare (optimize (debug 3)))
   (declare (type carray-index newlen))
   (macrolet ((audio-type (type form)
 	       `(dotimes (index newlen)
