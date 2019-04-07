@@ -28,10 +28,10 @@
 (defmacro clamp (min max x)
   `(max ,min (min ,max ,x)))
 
-(defparameter *format* (or ;;:mono8
-			   ;;:mono16
-			  ;; :stereo8
-			   :stereo16
+(defparameter *format* (or ;; %al:+format-mono8+
+			;; %al:+format-mono16+
+			;; %al:+format-stereo8+
+			%al:+format-stereo16+
 			   ))
 (defclass datobj ()
   ((source :initform nil)
@@ -44,36 +44,42 @@
    (data :initform nil)))
 
 (defun datobj-freeable? (&optional (datobj *datobj*))
-  (eq :stopped
-      (al:get-source (slot-value datobj 'source) :source-state)))
+  (eql
+   %al:+stopped+
+   (w-al::get-source (slot-value datobj 'source)
+		     %AL:+SOURCE-STATE+)))
 
 (defgeneric free (obj))
 
 (defun free-datobj (&optional (datobj *datobj*))
   (with-slots (source used-buffers data time-remaining) datobj
-    (al:source-stop source)
-    (al:source source :buffer 0)
+    (w-al::source-stop source)
+    (w-al::source source %al:+buffer+ 0)
     (free-buffers-hash used-buffers)
     (setf time-remaining 0)
     (free data)   
-    (al:delete-source source)))
+    (w-al::delete-source source)))
 
 (defun delete-one-buffer (buffer)
   (cffi:with-foreign-object (buffer-array :uint 1)
     (setf
      (cffi:mem-aref buffer-array :uint 0)
      buffer)
-    (%al:delete-buffers 1 buffer-array)))
+    (w-al::delete-buffers 1 buffer-array)))
 
 (defun free-a-buffer (datobj)
   ;;;(bordeaux-threads:with-lock-held (*free-buffers-lock*))
-  (let ((buf (al:get-source (slot-value datobj 'source) :buffer)))
+  (let ((buf (w-al::get-source (slot-value datobj 'source) %al:+buffer+)))
     (if (or (= buf 0)
 	    (= buf 1))
 	(format t "wut ~a" buf)
 	(delete-one-buffer buf)
 					;	  (push buf *free-buffers*)
 	)))
+
+(defmacro w-al-keyword (keyword)
+  ;;FIXME:: error if not a legit enum in %AL
+  (w-al::foo keyword))
 
 (defvar *lparallel-kernel* (lparallel:make-kernel 1 :name "sound"))
 (defmacro with-lparallel-sound-kernel (&body body)
@@ -96,21 +102,22 @@
 	      (let ((*format* format))
 		(multiple-value-bind (datobj source) (load-file filename)
 		  (when datobj
-		    (%al:source-3f source :position
+		    (%al:source3f source (w-al-keyword :position)
 				   (floatify x)
 				   (floatify y)
 				   (floatify z))
-		    (al:source source :velocity (load-time-value (vector 0.0 0.0 0.0)))
-		    (al:source source :gain volume)
-		    (al:source source :pitch pitch)
+		    (w-al::source source
+				  (w-al-keyword :velocity)
+				  (load-time-value (vector 0.0 0.0 0.0)))
+		    (w-al::source source (w-al-keyword :gain) volume)
+		    (w-al::source source (w-al-keyword :pitch) pitch)
 		    (push-sound datobj)
 		    (values datobj source))))))
 	  sound x y z))
 	(preloaded-music (play-preloaded-at sound x y z pitch volume))))))
 
 ;;;;FIXME::ripped from lparallel/utils
-(defun unsplice (form)
-  )
+
 (defmacro unwind-protect/ext (&key prepare main cleanup abort)
   "Extended `unwind-protect'.
 
@@ -216,16 +223,16 @@
       (let ((datobj (make-instance 'datobj)))
 	(setf *datobj* datobj)
 	(with-slots (source data) datobj
-	  (setf source (al:gen-source))	
+	  (setf source (w-al::gen-source))	
 	  (setf data sndfile)
 	  (values datobj
 		  source))))))
 (defun play (&optional (datobj *datobj*))
   (with-slots (source) datobj
-    (al:source-play source)))
+    (w-al::source-play source)))
 (defun pause (&optional (datobj *datobj*))
   (with-slots (source) datobj
-    (al:source-pause source)))
+    (w-al::source-pause source)))
 (defun stop (&optional (datobj *datobj*))
   (with-slots (status) datobj
     (setf status 'aborted)))
@@ -280,16 +287,16 @@
 	     (or (eq value 'aborted)
 		 (and (eq value t)
 		      (datobj-freeable? obj)))))))
-    (integer (eq :stopped
-		 (al:get-source obj :source-state)))))
+    (integer (eql (w-al-keyword :stopped)
+		  (w-al::get-source obj (w-al-keyword :source-state))))))
 
 (defun destroy-obj (obj)
   (etypecase obj
     (datobj
      (free-datobj obj))
     (integer
-     (al:source-stop obj)
-     (al:delete-source obj)
+     (w-al::source-stop obj)
+     (w-al::delete-source obj)
      )))
 
 (defun cleanup-poller ()
@@ -393,17 +400,21 @@
 					      format
 					      arr)
 					   (let ((buffer (get-buffer)))
-					     (al:buffer-data buffer format pcm playsize
+					     (w-al::buffer-data buffer format pcm playsize
 							     rate)
 					     (source-queue-buffer datobj buffer))))))	      
 				(let ((arrcount (ecase format
-						  ((:stereo8 :stereo16) (* samples 2))
-						  ((:mono8 :mono16) samples))))
+						  ((%al:+format-stereo8+
+						    %al:+format-stereo16+)
+						   (* samples 2))
+						  ((%al:+format-mono8+
+						    %al:+format-mono16+)
+						   samples))))
 				  (ecase format
-				    ((:mono8 :stereo8)
+				    ((%al:+format-mono8+ %al:+format-stereo8+)
 				     (cffi:with-foreign-object (arr :uint8 arrcount)
 				       (conv arr)))
-				    ((:mono16 :stereo16)
+				    ((%al:+format-mono16+ %al:+format-stereo16+ )
 				     (cffi:with-foreign-object (arr :int16 arrcount)
 				       (conv arr)))))))
 			  (when (eq status 'aborted)
@@ -476,19 +487,23 @@
 					   format
 					   arr)
 					(let ((buffer (get-buffer)))
-					  (al:buffer-data buffer format pcm playsize
+					  (w-al::buffer-data buffer format pcm playsize
 							  rate)
-					  (push buffer sound-buffers))))))	      
+					  (push buffer sound-buffers))))))
 			     (let ((arrcount (ecase format
-					       ((:stereo8 :stereo16) (* samples 2))
-					       ((:mono8 :mono16) samples))))
-			       (ecase format
-				 ((:mono8 :stereo8)
-				  (cffi:with-foreign-object (arr :uint8 arrcount)
-				    (conv arr)))
-				 ((:mono16 :stereo16)
-				  (cffi:with-foreign-object (arr :int16 arrcount)
-				    (conv arr)))))))))))))
+						  ((%al:+format-stereo8+
+						    %al:+format-stereo16+)
+						   (* samples 2))
+						  ((%al:+format-mono8+
+						    %al:+format-mono16+)
+						   samples))))
+				  (ecase format
+				    ((%al:+format-mono8+ %al:+format-stereo8+)
+				     (cffi:with-foreign-object (arr :uint8 arrcount)
+				       (conv arr)))
+				    ((%al:+format-mono16+ %al:+format-stereo16+ )
+				     (cffi:with-foreign-object (arr :int16 arrcount)
+				       (conv arr)))))))))))))
 	   (let ((inst
 		  (make-instance 'preloaded-music)))
 	     (with-slots (buffers) inst
@@ -501,27 +516,27 @@
   ((buffers :initform nil)))
 
 (defun play-preloaded-at (preloaded x y z pitch volume)
-  (let ((source (al:gen-source)))
-    (%al:source-3f source :position
+  (let ((source (w-al::gen-source)))
+    (w-al::source-3f source (w-al-keyword :position)
 		   (floatify x)
 		   (floatify y)
 		   (floatify z))
-    (al:source source :velocity (load-time-value (vector 0.0 0.0 0.0)))
-    (al:source source :gain volume)
-    (al:source source :pitch pitch)
-    (al:source-queue-buffers source (slot-value preloaded 'buffers))
-    (al:source-play source)
+    (w-al::source source (w-al-keyword :velocity) (load-time-value (vector 0.0 0.0 0.0)))
+    (w-al::source source (w-al-keyword :gain) volume)
+    (w-al::source source (w-al-keyword :pitch) pitch)
+    (w-al::source-queue-buffers source (slot-value preloaded 'buffers))
+    (w-al::source-play source)
     (push-sound source)))
 
 (defun free-preloaded (preloaded)
-  (al:delete-buffers (slot-value preloaded 'buffers)))
+  (w-al::delete-buffers (slot-value preloaded 'buffers)))
 
 
 (defun reset-listener ()
-  (al:listener :gain 1.0)
-  (al:listener :position (vector 0.0 0.0 0.0))
-  (al:listener :velocity (vector 0.0 0.0 0.0))
-  (al:listener :orientation (vector 0.0 1.0 0.0 0.0 1.0 0.0)))
+  (w-al::listener (w-al-keyword :gain) 1.0)
+  (w-al::listener (w-al-keyword :position) (vector 0.0 0.0 0.0))
+  (w-al::listener (w-al-keyword :velocity) (vector 0.0 0.0 0.0))
+  (w-al::listener (w-al-keyword :orientation) (vector 0.0 1.0 0.0 0.0 1.0 0.0)))
 
 (defun source-queue-buffer (datobj buffer)
   (with-slots (time-remaining (sid source) used-buffers) datobj
@@ -529,8 +544,8 @@
     (setf (gethash buffer used-buffers) t)
    
     (%source-queue-buffer sid buffer)
-    (unless (eq :paused (al:get-source sid :source-state))
-      (al:source-play sid))))
+    (unless (eq :paused (w-al::get-source sid (w-al-keyword :source-state)))
+      (w-al::source-play sid))))
 (defun free-buffers (datobj)
   (with-slots (source time-remaining) datobj
     (multiple-value-bind (time bufs)
@@ -560,20 +575,20 @@
   #+nil
   (or (bordeaux-threads:with-lock-held (*free-buffers-lock*)
 	(pop *free-buffers*)))
-  (al:gen-buffer))
+  (w-al::gen-buffer))
 #+nil
 (defparameter *free-buffers* nil)
 #+nil
 (defparameter *free-buffers-lock* (bordeaux-threads:make-lock "free albuffers"))
 (defun %free-buffers (sid datobj)
-  (let ((bufs (al:get-source sid :buffers-processed))
+  (let ((bufs (w-al::get-source sid (w-al-keyword :buffers-processed)))
 	(time 0)
 	(used-buffers (slot-value datobj 'used-buffers)))
     (when (< 0 bufs)
       (cffi:with-foreign-object (buffer-array :uint bufs)
 	(dotimes (index bufs)
 	  (setf (cffi:mem-aref buffer-array :uint index) 0))
-	(%al:source-unqueue-buffers sid bufs buffer-array)
+	(w-al::source-unqueue-buffers sid bufs buffer-array)
 	(dotimes (index bufs)
 	  (let ((buf (cffi:mem-aref buffer-array :uint index)))
 	    (when (not (zerop buf))
@@ -591,22 +606,22 @@
   (cffi:with-foreign-object (buffer-array :uint 1)
     (setf (cffi:mem-aref buffer-array :uint 0)
 	  buffer)
-    (%al:source-queue-buffers sid 1 buffer-array)))
+    (w-al::source-queue-buffers sid 1 buffer-array)))
 
 (defun buffer-samples (buffer)
-  (let ((size (floatify (al:get-buffer buffer :size))) ;byte count
-	(bits (floatify (al:get-buffer buffer :bits))) ;;bit depth eg: 16 or 8
-	(channels (floatify (al:get-buffer buffer :channels))))
+  (let ((size (floatify (w-al::get-buffer buffer (w-al-keyword :size)))) ;byte count
+	(bits (floatify (w-al::get-buffer buffer (w-al-keyword :bits)))) ;;bit depth eg: 16 or 8
+	(channels (floatify (w-al::get-buffer buffer (w-al-keyword :channels)))))
     (/ (* size 8)
        (* channels bits))))
 
 ;;;;;
 #+nil
 (defun buffer-seconds (buffer)
-  (let ((size (floatify (al:get-buffer buffer :size))) ;byte count
-	(bits (floatify (al:get-buffer buffer :bits))) ;;bit depth eg: 16 or 8
-	(channels (floatify (al:get-buffer buffer :channels)))
-	(frequency (floatify (al:get-buffer buffer :frequency))))
+  (let ((size (floatify (w-al::get-buffer buffer :size))) ;byte count
+	(bits (floatify (w-al::get-buffer buffer :bits))) ;;bit depth eg: 16 or 8
+	(channels (floatify (w-al::get-buffer buffer :channels)))
+	(frequency (floatify (w-al::get-buffer buffer :frequency))))
     ;;   (print (list size bits channels frequency))
     (/ (* size 8)
        (* channels bits frequency))
@@ -616,26 +631,26 @@
 (defparameter *alc-device* nil)
 (defun open-device ()
   (close-device)
-  (setf *alc-device* (alc:open-device)))
+  (setf *alc-device* (w-alc::open-device)))
 (defun close-device ()
   (when (cffi:pointerp *alc-device*)
-    (alc:close-device *alc-device*))
+    (w-alc::close-device *alc-device*))
   (setf *alc-device* nil))
 (defparameter *alc-context* nil)
 (defun open-context ()
   (close-context)
-  (let ((context (alc:create-context *alc-device*)))
+  (let ((context (w-alc::create-context *alc-device*)))
     (setf *alc-context* context)
-    (alc:make-context-current context)))
+    (w-alc::make-context-current context)))
 (defun close-context ()
   (when (cffi:pointerp *alc-context*)
-    (alc:make-context-current (cffi:null-pointer))
-    (alc:destroy-context *alc-context*))
+    (w-alc::make-context-current (cffi:null-pointer))
+    (w-alc::destroy-context *alc-context*))
   (setf *alc-context* nil))
 (defun start-al ()
   (open-device)
   (open-context)
-  (alc:make-context-current *alc-context*)
+  (w-alc::make-context-current *alc-context*)
   (start-poller)
   (reset-listener))
 (defun destroy-al ()
@@ -665,16 +680,16 @@
   (ecase channels
     (1 (let ((channel (cffi:mem-aref data :pointer 0)))
 	 (case playback-format
-	   (:mono8
+	   (%al:+format-mono8+
 	    (values (array->uint8 channel format len arr)
 		    len))
-	   (:mono16
+	   (%al:+format-mono16+
 	    (values (array->int16 channel format len arr)
 		    (* 2 len)))
-	   (:stereo8
+	   (%al:+format-stereo8+
 	    (values (mono->stereo8 channel format (* 2 len) arr)
 		    (* len 2)))
-	   (:stereo16
+	   (%al:+format-stereo16+
 	    (values (mono->stereo16 channel format (* 2 len) arr)
 		    (* len 4))))))
     (2
@@ -682,30 +697,30 @@
 	 (let ((left (cffi:mem-aref data :pointer 0))
 	       (right (cffi:mem-aref data :pointer 1)))
 	   (case playback-format
-	     (:mono8
+	     (%al:+format-mono8+
 	      (values (planar-stereo->mono8 left right format len arr)
 		      len))
-	     (:mono16
+	     (%al:+format-mono16+
 	      (values (planar-stereo->mono16 left right format len arr)
 		      (* 2 len)))
-	     (:stereo8
+	     (%al:+format-stereo8+
 	      (values (planar-stereo->stereo8 left right format (* 2 len) arr)
 		      (* len 2)))
-	     (:stereo16
+	     (%al:+format-stereo16+
 	      (values (planar-stereo->stereo16 left right format (* 2 len) arr)
 		      (* len 4)))))
 	 (let ((channel (cffi:mem-aref data :pointer 0)))
 	   (case playback-format
-	     (:mono8
+	     (%al:+format-mono8+ 
 	      (values (interleaved-stereo->mono8 channel format len arr)
 		      len))
-	     (:mono16
+	     (%al:+format-mono16+
 	      (values (interleaved-stereo->mono16 channel format len arr)
 		      (* 2 len)))
-	     (:stereo8
+	     (%al:+format-stereo8+
 	      (values (array->uint8 channel format (* 2 len) arr)
 		      (* len 2)))
-	     (:stereo16
+	     (%al:+format-stereo16+
 	      (values (array->int16 channel format (* 2 len) arr)
 		      (* len 4)))))))))
 

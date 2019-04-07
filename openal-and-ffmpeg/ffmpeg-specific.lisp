@@ -34,17 +34,21 @@
 				  arr)
 			       (let ((buffer (get-buffer)))
 				 (al:buffer-data buffer format pcm playsize rate)
-				 (source-queue-buffer datobj buffer)))))	      
+				 (source-queue-buffer datobj buffer)))))
 		      (let ((arrcount (ecase format
-					((:stereo8 :stereo16) (* samples 2))
-					((:mono8 :mono16) samples))))
+					((%al:+format-stereo8+
+					  %al:+format-stereo16+)
+					 (* samples 2))
+					((%al:+format-mono8+
+					  %al:+format-mono16+)
+					 samples))))
 			(ecase format
-			  ((:mono8 :stereo8)
+			  ((%al:+format-mono8+ %al:+format-stereo8+)
 			   (cffi:with-foreign-object (arr :uint8 arrcount)
-			     (conv arr)))
-			  ((:mono16 :stereo16)
+						     (conv arr)))
+			  ((%al:+format-mono16+ %al:+format-stereo16+ )
 			   (cffi:with-foreign-object (arr :int16 arrcount)
-			     (conv arr))))))
+						     (conv arr))))))
 		    (when (eq status 'aborted)
 		      (return 'aborted))
 		    (decf target-samples samples)
@@ -85,15 +89,19 @@
 				(al:buffer-data buffer format pcm playsize rate)
 				(push buffer sound-buffers)))))
 		     (let ((arrcount (ecase format
-				       ((:stereo8 :stereo16) (* samples 2))
-				       ((:mono8 :mono16) samples))))
+				       ((%al:+format-stereo8+
+					 %al:+format-stereo16+)
+					(* samples 2))
+				       ((%al:+format-mono8+
+					 %al:+format-mono16+)
+					samples))))
 		       (ecase format
-			 ((:mono8 :stereo8)
+			 ((%al:+format-mono8+ %al:+format-stereo8+)
 			  (cffi:with-foreign-object (arr :uint8 arrcount)
-			    (conv arr)))
-			 ((:mono16 :stereo16)
+						    (conv arr)))
+			 ((%al:+format-mono16+ %al:+format-stereo16+ )
 			  (cffi:with-foreign-object (arr :int16 arrcount)
-			    (conv arr)))))))
+						    (conv arr)))))))
 	       (setf completed? t))
 	     (let ((inst
 		    (make-instance 'preloaded-music)))

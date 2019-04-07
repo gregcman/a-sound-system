@@ -1,6 +1,9 @@
 (asdf:defsystem #:music
-  :depends-on (:cl-openal
-	       :cl-alc
+  :depends-on (;;:cl-openal
+	       ;;:cl-alc
+
+	       :bodge-openal
+	       :openal-blob
 	       :bordeaux-threads
 	       ;;:musical-binaries
 	       ;;:ffmpeg-bindings
@@ -8,7 +11,9 @@
 	       :sndfile-blob
 	       :iterate
 	       :lparallel
-	       :float-features)
+	       :float-features
+	       :cffi)
     :serial t
     :components 
-    ((:file "openal")))
+    ((:file "al")
+     (:file "openal")))
