@@ -65,7 +65,7 @@
     (setf
      (cffi:mem-aref buffer-array :uint 0)
      buffer)
-    (w-al::delete-buffers 1 buffer-array)))
+    (%al::delete-buffers 1 buffer-array)))
 
 (defun free-a-buffer (datobj)
   ;;;(bordeaux-threads:with-lock-held (*free-buffers-lock*))
@@ -403,14 +403,14 @@
 					     (w-al::buffer-data buffer format pcm playsize
 							     rate)
 					     (source-queue-buffer datobj buffer))))))	      
-				(let ((arrcount (ecase format
+				(let ((arrcount (w-al::ecases format
 						  ((%al:+format-stereo8+
 						    %al:+format-stereo16+)
 						   (* samples 2))
 						  ((%al:+format-mono8+
 						    %al:+format-mono16+)
 						   samples))))
-				  (ecase format
+				  (w-al::ecases format
 				    ((%al:+format-mono8+ %al:+format-stereo8+)
 				     (cffi:with-foreign-object (arr :uint8 arrcount)
 				       (conv arr)))
@@ -488,16 +488,16 @@
 					   arr)
 					(let ((buffer (get-buffer)))
 					  (w-al::buffer-data buffer format pcm playsize
-							  rate)
+							     rate)
 					  (push buffer sound-buffers))))))
-			     (let ((arrcount (ecase format
-						  ((%al:+format-stereo8+
-						    %al:+format-stereo16+)
-						   (* samples 2))
-						  ((%al:+format-mono8+
-						    %al:+format-mono16+)
-						   samples))))
-				  (ecase format
+			     (let ((arrcount (w-al::ecases format
+							   ((%al:+format-stereo8+
+							     %al:+format-stereo16+)
+							    (* samples 2))
+							   ((%al:+format-mono8+
+							     %al:+format-mono16+)
+							    samples))))
+			       (w-al::ecases format
 				    ((%al:+format-mono8+ %al:+format-stereo8+)
 				     (cffi:with-foreign-object (arr :uint8 arrcount)
 				       (conv arr)))
@@ -517,7 +517,7 @@
 
 (defun play-preloaded-at (preloaded x y z pitch volume)
   (let ((source (w-al::gen-source)))
-    (w-al::source-3f source (w-al-keyword :position)
+    (%al::source3f source (w-al-keyword :position)
 		   (floatify x)
 		   (floatify y)
 		   (floatify z))
@@ -588,7 +588,7 @@
       (cffi:with-foreign-object (buffer-array :uint bufs)
 	(dotimes (index bufs)
 	  (setf (cffi:mem-aref buffer-array :uint index) 0))
-	(w-al::source-unqueue-buffers sid bufs buffer-array)
+	(%al::source-unqueue-buffers sid bufs buffer-array)
 	(dotimes (index bufs)
 	  (let ((buf (cffi:mem-aref buffer-array :uint index)))
 	    (when (not (zerop buf))
@@ -606,7 +606,7 @@
   (cffi:with-foreign-object (buffer-array :uint 1)
     (setf (cffi:mem-aref buffer-array :uint 0)
 	  buffer)
-    (w-al::source-queue-buffers sid 1 buffer-array)))
+    (%al::source-queue-buffers sid 1 buffer-array)))
 
 (defun buffer-samples (buffer)
   (let ((size (floatify (w-al::get-buffer buffer (w-al-keyword :size)))) ;byte count
@@ -679,50 +679,53 @@
 (defun convert (channels data len format playback-format arr) 
   (ecase channels
     (1 (let ((channel (cffi:mem-aref data :pointer 0)))
-	 (case playback-format
-	   (%al:+format-mono8+
-	    (values (array->uint8 channel format len arr)
-		    len))
-	   (%al:+format-mono16+
-	    (values (array->int16 channel format len arr)
-		    (* 2 len)))
-	   (%al:+format-stereo8+
-	    (values (mono->stereo8 channel format (* 2 len) arr)
-		    (* len 2)))
-	   (%al:+format-stereo16+
-	    (values (mono->stereo16 channel format (* 2 len) arr)
-		    (* len 4))))))
+	 (w-al::ecases
+	  playback-format
+	  ((%al:+format-mono8+)
+	   (values (array->uint8 channel format len arr)
+		   len))
+	  ((%al:+format-mono16+)
+	   (values (array->int16 channel format len arr)
+		   (* 2 len)))
+	  ((%al:+format-stereo8+)
+	   (values (mono->stereo8 channel format (* 2 len) arr)
+		   (* len 2)))
+	  ((%al:+format-stereo16+)
+	   (values (mono->stereo16 channel format (* 2 len) arr)
+		   (* len 4))))))
     (2
      (if (planar-p format)
 	 (let ((left (cffi:mem-aref data :pointer 0))
 	       (right (cffi:mem-aref data :pointer 1)))
-	   (case playback-format
-	     (%al:+format-mono8+
-	      (values (planar-stereo->mono8 left right format len arr)
-		      len))
-	     (%al:+format-mono16+
-	      (values (planar-stereo->mono16 left right format len arr)
-		      (* 2 len)))
-	     (%al:+format-stereo8+
-	      (values (planar-stereo->stereo8 left right format (* 2 len) arr)
-		      (* len 2)))
-	     (%al:+format-stereo16+
-	      (values (planar-stereo->stereo16 left right format (* 2 len) arr)
-		      (* len 4)))))
+	   (w-al::ecases
+	    playback-format
+	    ((%al:+format-mono8+)
+	     (values (planar-stereo->mono8 left right format len arr)
+		     len))
+	    ((%al:+format-mono16+)
+	     (values (planar-stereo->mono16 left right format len arr)
+		     (* 2 len)))
+	    ((%al:+format-stereo8+)
+	     (values (planar-stereo->stereo8 left right format (* 2 len) arr)
+		     (* len 2)))
+	    ((%al:+format-stereo16+)
+	     (values (planar-stereo->stereo16 left right format (* 2 len) arr)
+		     (* len 4)))))
 	 (let ((channel (cffi:mem-aref data :pointer 0)))
-	   (case playback-format
-	     (%al:+format-mono8+ 
-	      (values (interleaved-stereo->mono8 channel format len arr)
-		      len))
-	     (%al:+format-mono16+
-	      (values (interleaved-stereo->mono16 channel format len arr)
-		      (* 2 len)))
-	     (%al:+format-stereo8+
-	      (values (array->uint8 channel format (* 2 len) arr)
-		      (* len 2)))
-	     (%al:+format-stereo16+
-	      (values (array->int16 channel format (* 2 len) arr)
-		      (* len 4)))))))))
+	   (w-al::ecases
+	    playback-format
+	    ((%al:+format-mono8+) 
+	     (values (interleaved-stereo->mono8 channel format len arr)
+		     len))
+	    ((%al:+format-mono16+)
+	     (values (interleaved-stereo->mono16 channel format len arr)
+		     (* 2 len)))
+	    ((%al:+format-stereo8+)
+	     (values (array->uint8 channel format (* 2 len) arr)
+		     (* len 2)))
+	    ((%al:+format-stereo16+)
+	     (values (array->int16 channel format (* 2 len) arr)
+		     (* len 4)))))))))
 
 ;;	DC DAC Modeled -> [-1.0 1.0] -> [-32768 32767]
 ;;      apple core audo, alsa, matlab, sndlib -> (lambda (x) (* x #x8000))

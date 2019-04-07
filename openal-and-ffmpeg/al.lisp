@@ -7,7 +7,7 @@
 (defun open-device (&optional device-name)
   (let ((foreign-dev (%alc:open-device (or device-name
                                            (cffi:null-pointer)))))
-    (if (cffi:null-pointer-p foreign-dev)
+    (if (claw:wrapper-null-p foreign-dev)
         nil
         foreign-dev)))
 
@@ -16,18 +16,21 @@
 
 (defun create-context (device &rest attributes)
   (let ((foreign-ctx
-         (%alc:create-context device
-                              (if attributes
-                                  (let ((n (length attributes)))
-                                    (cffi:with-foreign-object (attrlist :pointer ;;FIXME -> claw?
-									n)
-                                      (loop for i below n
-                                         do (setf (cffi:mem-aref attrlist :pointer ;;FIXME also
-								 i)
-                                                  (elt attributes i)))
-                                      attrlist))
-                                  (cffi:null-pointer)))))
-    (if (cffi:null-pointer-p foreign-ctx)
+         
+	 (if attributes
+	     (error "attributes not implemented ~a" attributes)
+	     #+nil
+	     (let ((n (length attributes)))
+	       (cffi:with-foreign-object
+		(attrlist :pointer ;;FIXME -> claw?
+			  n)
+		(loop for i below n
+		   do (setf (cffi:mem-aref attrlist :pointer ;;FIXME also
+					   i)
+			    (elt attributes i)))
+		(%alc:create-context device attrlist)))
+	     (%alc:create-context device (cffi:null-pointer)))))
+    (if (claw:wrapper-null-p foreign-ctx)
         nil
         foreign-ctx)))
 
@@ -51,6 +54,7 @@
 
 (defun extension-present-p (device extname)
   (%alc:is-extension-present device extname))
+#+nil ;;;FIXME::uses two arguments, not one
 (defun get-proc-address (funcname)
   (%alc:get-proc-address funcname))
 
@@ -90,7 +94,6 @@
                   (elt samples i)))
       (%alc:capture-samples device buffer n-samples))))
 
-;;;
 ;;; Helper macros to keep the world tidy.
 ;;;
 
@@ -126,6 +129,21 @@
 (defpackage :w-al
   (:use :cl))
 (in-package :w-al)
+
+(defun ecases-gen (thing other-thing)
+  `(or ,@(mapcar (lambda (n)
+		   `(eql ,thing ,n))
+		 other-thing)))
+(defmacro ecases (thing &rest pairs)
+  (alexandria:once-only (thing)
+    `(cond
+       ,@(mapcar (lambda (x)
+		   `(,(ecases-gen thing (first x))
+		      ,(second x)))
+		 pairs)
+       (t (error "reached end of ecases")))))
+
+;;;
 
 ;;;Ripped from zkat's cl-openal
 
@@ -168,7 +186,7 @@
 ;;; Listener
 ;;;
 (defun listener (param value)
-  (ecase param
+  (ecases param
     ((%AL:+POSITION+ %AL:+VELOCITY+)
      (assert (= 3 (length value)))
      (%al:listener3f param (elt value 0) (elt value 1) (elt value 2)))
@@ -183,7 +201,7 @@
      (%al:listenerf param value))))
 
 (defun get-listener (param)
-  (ecase param
+  (ecases param
     ((%AL:+GAIN+)
      (cffi:with-foreign-object (ptr :float)
        (%al:get-listenerf param ptr)
@@ -224,7 +242,7 @@
   (%al:is-source sid))
 
 (defun source (sid param value)
-  (ecase param
+  (ecases param
     ((%AL:+GAIN+ %AL:+PITCH+ %AL:+MIN-GAIN+ %AL:+MAX-GAIN+ %AL:+REFERENCE-DISTANCE+
 		 %AL:+ROLLOFF-FACTOR+ %AL:+MAX-DISTANCE+ %AL:+SEC-OFFSET+ %AL:+SAMPLE-OFFSET+
 		 %AL:+BYTE-OFFSET+ %AL:+CONE-INNER-ANGLE+ %AL:+CONE-OUTER-ANGLE+
@@ -239,7 +257,7 @@
      (%al:source3f sid param (elt value 0) (elt value 1) (elt value 2)))))
 
 (defun get-source (sid param)
-  (ecase param
+  (ecases param
     ((%AL:+GAIN+ %AL:+PITCH+ %AL:+MIN-GAIN+ %AL:+MAX-GAIN+ %AL:+REFERENCE-DISTANCE+
 		 %AL:+SEC-OFFSET+ %AL:+ROLLOFF-FACTOR+ %AL:+MAX-DISTANCE+
 		 %AL:+CONE-INNER-ANGLE+ %AL:+CONE-OUTER-ANGLE+ %AL:+CONE-OUTER-GAIN+
@@ -255,10 +273,11 @@
      (cffi:with-foreign-object (ptr :int)
        (%al:get-sourcei sid param ptr)
        (cffi:mem-ref ptr :int)))
-    (%AL:+SOURCE-STATE+
-     (cffi:with-foreign-object (ptr :int)
-       (%al:get-sourcei sid param ptr)
-       (cffi:foreign-enum-keyword '%al:enum (cffi:mem-ref ptr :int))))
+    ((%AL:+SOURCE-STATE+)
+     (cffi:with-foreign-object
+      (ptr :int)
+      (%al:get-sourcei sid param ptr)
+      (cffi:mem-ref ptr :int)))
     ((%AL:+POSITION+ %AL:+VELOCITY+ %AL:+DIRECTION+)
      (cffi:with-foreign-object (source-array :float 3)
        (%al:get-sourcefv sid param source-array)
