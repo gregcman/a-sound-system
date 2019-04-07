@@ -1,12 +1,6 @@
 (defpackage #:music
   (:use #:cl
 	#:iterate)
-  (:import-from
-   #:cl-ffmpeg
-   #:rate
-   #:bytes-per-sample
-   #:channels
-   #:audio-format)
   (:export
    #:play-at))
 (in-package #:music)
@@ -53,13 +47,17 @@
   (eq :stopped
       (al:get-source (slot-value datobj 'source) :source-state)))
 
+(defgeneric free (obj))
+(defmethod free ((obj cl-ffmpeg::music-stuff))
+  (cl-ffmpeg::free-music-stuff obj))
+
 (defun free-datobj (&optional (datobj *datobj*))
   (with-slots (source used-buffers data time-remaining) datobj
     (al:source-stop source)
     (al:source source :buffer 0)
     (free-buffers-hash used-buffers)
     (setf time-remaining 0)
-    (cl-ffmpeg::free-music-stuff data)   
+    (free data)   
     (al:delete-source source)))
 
 (defun delete-one-buffer (buffer)
@@ -112,10 +110,117 @@
 	  sound x y z))
 	(preloaded-music (play-preloaded-at sound x y z pitch volume))))))
 
+;;;;FIXME::ripped from lparallel/utils
+(defun unsplice (form)
+  (if form (list form) nil))
+(defmacro unwind-protect/ext (&key prepare main cleanup abort)
+  "Extended `unwind-protect'.
+
+`prepare' : executed first, outside of `unwind-protect'
+`main'    : protected form
+`cleanup' : cleanup form
+`abort'   : executed if `main' does not finish
+"
+  (alexandria::with-gensyms (finishedp)
+    `(progn
+       ,@(unsplice prepare)
+       ,(cond ((and main cleanup abort)
+               `(let ((,finishedp nil))
+                  (declare (type boolean ,finishedp))
+                  (unwind-protect
+                       (prog1 ,main  ; m-v-prog1 in real life
+                         (setf ,finishedp t))
+                    (if ,finishedp
+                        ,cleanup
+                        (unwind-protect ,abort ,cleanup)))))
+              ((and main cleanup)
+               `(unwind-protect ,main ,cleanup))
+              ((and main abort)
+               `(let ((,finishedp nil))
+                  (declare (type boolean ,finishedp))
+                  (unwind-protect
+                       (prog1 ,main
+                         (setf ,finishedp t))
+                    (when (not ,finishedp)
+                      ,abort))))
+              (main main)
+              (cleanup `(progn ,cleanup nil))
+              (abort nil)
+              (t nil)))))
+#+nil
+(defun test78 ()
+  (let ((bar 0))
+    (unwind-protect/ext
+     :prepare )))
+
+(defclass sndfile-stuff ()
+  ((info :initform nil)
+   (handle :initform nil)
+   (sf-file :initform nil)))
+
+(defun create-sndfile (&optional (path #P"/home/imac/.minecraft/resources/sound/step/grass1.ogg"))
+  (let ((stuff (make-instance 'sndfile-stuff))
+	(aborted? nil))   
+    (with-slots (info handle sf-file) stuff
+      (unwind-protect/ext
+       :main
+       (progn
+	 (setf info (claw:calloc '%sndfile:info 1))
+	 (unwind-protect/ext
+	  :main  (progn (setf handle
+			      (sndfile::%catch-sound-errors nil
+				(%sndfile:open
+				 (namestring
+				  path)
+				 %sndfile:+m-read+ info)))
+			(setf sf-file
+			      (sndfile::%make-sound-file handle
+							 (claw:c-ref info %sndfile:info
+								     :samplerate)
+							 (claw:c-ref info %sndfile:info
+								     :channels)
+							 (claw:c-ref info %sndfile:info
+								     :frames))))
+	  :abort (progn
+		   (setf aborted? t)
+		   (%sndfile:close handle))))
+       :abort
+       (progn
+	 (setf aborted? t)
+	 (claw:free info))))
+    (if aborted?
+	(values nil nil)
+	(values stuff t))))
+(defun destroy-sndfile (sndfile)
+  (with-slots (info handle ;;sf-file
+		    )
+      sndfile
+    (%sndfile:close handle)
+    (claw:free info)))
+
+(defun sndfile (&optional (path #P"/home/imac/.minecraft/resources/sound/step/grass1.ogg"))
+  
+  (sndfile::%catch-sound-errors (handle)
+    (print (sndfile:read-short-samples-into-array sf-file)))
+    
+  
+  )
+
+
 (defparameter *datobj* nil)
 ;;do not switch source formats!!!!
 (defun load-file (music-file)
+  #+nil
   (let ((ffmpeg-stuff (cl-ffmpeg::init-music-stuff music-file)))
+    (when ffmpeg-stuff
+      (let ((datobj (make-instance 'datobj)))
+	(setf *datobj* datobj)
+	(with-slots (source data) datobj
+	  (setf source (al:gen-source))	
+	  (setf data ffmpeg-stuff)
+	  (values datobj
+		  source)))))
+  (let ((ffmpeg-stuff (%sndfile:open (namestring path) %sndfile:+m-read+ sound-info)))
     (when ffmpeg-stuff
       (let ((datobj (make-instance 'datobj)))
 	(setf *datobj* datobj)
