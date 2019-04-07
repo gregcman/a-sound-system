@@ -28,9 +28,9 @@
 (defmacro clamp (min max x)
   `(max ,min (min ,max ,x)))
 
-(defparameter *format* (or :mono8
-			   :mono16
-			   :stereo8
+(defparameter *format* (or ;;:mono8
+			   ;;:mono16
+			  ;; :stereo8
 			   :stereo16
 			   ))
 (defclass datobj ()
@@ -309,59 +309,80 @@
 (defun start-poller ()
   (setf *sound-thread* (iosub (poller))))
 
+(defmacro while (statement &body body)
+  `(do () ((not ,statement))
+     ,@body))
+
 (defun update-playable (datobj)
-  (macrolet ((exit (x)
-	       `(return-from exit ,x)))
-    (block exit
-      (with-slots (status time-remaining (format playback) (music data)) datobj
-	(let* ((rate
-		(sndfile:sound-sample-rate (slot-value music 'sf-file)))
-	       (threshold 0.0)
-	       (target 10.0))
-	  #+nil
-	  (when (not rate)
-	    (setf status 'aborted)
-	    (exit 'aborted))
-	  (when (eq status 'aborted)
-	    (exit 'aborted))
-	  (tagbody move
-	     (free-buffers datobj)
-	     (when (>= (* rate threshold) time-remaining)
-	       (let ((target-samples (* rate target)))
-		 (setf
-		  status
-		  (block nil
-		    (let ((file (slot-value music 'sf-file)))
-		      (let* ((channels (sndfile:sound-channels file))
-			     (inttarget-samples (floor target-samples))
-			     (buf-length (* channels inttarget-samples))
-			     (audio-format :s32
-			       ))
-			(cffi:with-foreign-object 
-			 (what :int buf-length)
-			 (let ((samples
-				(/ (%sndfile:read-short
-				    (sndfile::sound-handle file)
-				    what					     
-				    inttarget-samples)
-				   channels)))
-			   (if (zerop samples)
-			       ;;its finished, returning t means finish for some reason
-			       (return t)
-			       ;;otherwise, send the samples to openal
-			       (flet ((conv (arr)
-					(cffi:with-foreign-object
-					 (hack :pointer channels) ;leftover from ffmpeg API
+  (block exit
+    (with-slots (status time-remaining (format playback) (music data)) datobj
+      (let* ((rate
+	      (sndfile:sound-sample-rate (slot-value music 'sf-file)))
+	     (threshold 5.0)
+	     (target 10.0)
+	     (bailout 0))
+	;;FIXME::get better estimate on time-remaining?
+	#+nil
+	(when (not rate)
+	  (setf status 'aborted)
+	  (exit 'aborted))
+	(when (eq status 'aborted)
+	  (return-from exit 'aborted))
+	(when (eq status t)
+	  (return-from exit t))
+	(tagbody move
+	   (free-buffers datobj)
+	   ;;(print time-remaining)
+	   (when 
+	       (>= (* rate threshold) time-remaining)
+	     (let ((target-samples (* rate target)))
+	       ;;	 (print target-samples)
+	       (setf
+		status
+		(block status
+		  (while (and (> 20 bailout)
+			      (plusp target-samples))
+		    (incf bailout 1)
+		    ;;(print bailout)
+		    (let* ((file (slot-value music 'sf-file))
+			   (channels (sndfile:sound-channels file))
+			   (inttarget-samples (* rate
+						 channels
+					;(floor target-samples)
+						 ))
+			   (buf-length (* channels inttarget-samples))
+			   (audio-format :s32
+			     ))
+		      (cffi:with-foreign-object 
+			  (what :int buf-length)
+			(let ((samples
+			       (/ (%sndfile:read-int
+				   (sndfile::sound-handle file)
+				   what					     
+				   inttarget-samples)
+				  channels)))
+			  ;;(format t "~%samples read ~a" samples)
+			  (if (zerop samples)
+			      ;;its finished, returning t means finish for some reason
+			      (return-from status t)
+			      ;;otherwise, send the samples to openal
+			      (flet ((conv (arr)
+				       (cffi:with-foreign-object
+					   (hack :pointer channels) ;leftover from ffmpeg API
 					 ;;FIXME?
 
-					 ;;#+nil
+					 (setf (cffi:mem-aref hack :pointer 0)
+					       (cffi:mem-aptr what :int))
+					 #+nil
 					 (dotimes (channel-num channels)
 					   (setf (cffi:mem-aref hack :pointer channel-num)
 						 ;;FIXME:: its not planar, so what's the
 						 ;;point of more than one channel?
 						 (cffi:mem-aptr what :int
-								(* channel-num
-								   samples))))
+								0
+								#+nil
+								(*  channel-num
+								    samples))))
 					 
 					 (multiple-value-bind (pcm playsize)
 					     (convert
@@ -372,32 +393,112 @@
 					      format
 					      arr)
 					   (let ((buffer (get-buffer)))
-					     (al:buffer-data buffer format pcm playsize rate)
+					     (al:buffer-data buffer format pcm playsize
+							     rate)
 					     (source-queue-buffer datobj buffer))))))	      
-				 (let ((arrcount (ecase format
-						   ((:stereo8 :stereo16) (* samples 2))
-						   ((:mono8 :mono16) samples))))
-				   (ecase format
-				     ((:mono8 :stereo8)
-				      (cffi:with-foreign-object (arr :uint8 arrcount)
-								(conv arr)))
-				     ((:mono16 :stereo16)
-				      (cffi:with-foreign-object (arr :int16 arrcount)
-								(conv arr)))))))
-			   (when (eq status 'aborted)
-			     (return 'aborted))
-			   (decf target-samples samples)
-			   (when (>= 0 target-samples)
-			     (return nil)))))))))
+				(let ((arrcount (ecase format
+						  ((:stereo8 :stereo16) (* samples 2))
+						  ((:mono8 :mono16) samples))))
+				  (ecase format
+				    ((:mono8 :stereo8)
+				     (cffi:with-foreign-object (arr :uint8 arrcount)
+				       (conv arr)))
+				    ((:mono16 :stereo16)
+				     (cffi:with-foreign-object (arr :int16 arrcount)
+				       (conv arr)))))))
+			  (when (eq status 'aborted)
+			    (return-from status 'aborted))
+			  (decf target-samples samples)
+			  (when (>= 0 target-samples)
+			    (return-from status nil))))))))
+	       
 	       (when
 		   (eq status nil)
 		 (go move)))))))))
 
+(defun load-all (file &optional (format *format*))
+  (when (pathnamep file)
+    (setf file (namestring file)))
+  (let ((music nil)
+	(sound-buffers ()))
+    (unwind-protect
+	 (progn
+	   (setf music (create-sndfile file))
+	   (block exit
+	     (while t
+	       (let* ((rate
+		       (sndfile:sound-sample-rate (slot-value music 'sf-file))))
+		 (let* ((file (slot-value music 'sf-file))
+			(channels (sndfile:sound-channels file))
+			(inttarget-samples (* rate
+					      channels))
+			(buf-length (* channels inttarget-samples))
+			(audio-format :s32
+			  ))
+		   (cffi:with-foreign-object 
+		       (what :int buf-length)
+		     (let ((samples
+			    (/ (%sndfile:read-int
+				(sndfile::sound-handle file)
+				what					     
+				inttarget-samples)
+			       channels)))
+		       ;;(format t "~%samples read ~a" samples)
+		       (if (zerop samples)
+			   ;;its finished, returning t means finish for some reason
+			   ;;DOESN'T matter for load-all
+			   (return-from exit t)
+			   ;;otherwise, send the samples to openal
+			   (flet ((conv (arr)
+				    (cffi:with-foreign-object
+					(hack :pointer channels) ;leftover from ffmpeg API
+				      ;;FIXME?
+
+				      (setf (cffi:mem-aref hack :pointer 0)
+					    (cffi:mem-aptr what :int))
+				      #+nil
+				      (dotimes (channel-num channels)
+					(setf (cffi:mem-aref hack :pointer channel-num)
+					      ;;FIXME:: its not planar, so what's the
+					      ;;point of more than one channel?
+					      (cffi:mem-aptr what :int
+							     0
+							     #+nil
+							     (*  channel-num
+								 samples))))
+				      
+				      (multiple-value-bind (pcm playsize)
+					  (convert
+					   channels
+					   hack
+					   samples
+					   audio-format
+					   format
+					   arr)
+					(let ((buffer (get-buffer)))
+					  (al:buffer-data buffer format pcm playsize
+							  rate)
+					  (push buffer sound-buffers))))))	      
+			     (let ((arrcount (ecase format
+					       ((:stereo8 :stereo16) (* samples 2))
+					       ((:mono8 :mono16) samples))))
+			       (ecase format
+				 ((:mono8 :stereo8)
+				  (cffi:with-foreign-object (arr :uint8 arrcount)
+				    (conv arr)))
+				 ((:mono16 :stereo16)
+				  (cffi:with-foreign-object (arr :int16 arrcount)
+				    (conv arr)))))))))))))
+	   (let ((inst
+		  (make-instance 'preloaded-music)))
+	     (with-slots (buffers) inst
+	       (setf buffers (coerce (nreverse sound-buffers) 'vector)))
+	     inst))
+      (destroy-sndfile music))))
+
 
 (defclass preloaded-music ()
-  ((buffers :initform nil)
-   (complete :initform nil)
-   (info :initform nil)))
+  ((buffers :initform nil)))
 
 (defun play-preloaded-at (preloaded x y z pitch volume)
   (let ((source (al:gen-source)))

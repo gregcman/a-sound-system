@@ -2,8 +2,8 @@
   :depends-on (:cl-openal
 	       :cl-alc
 	       :bordeaux-threads
-	       :musical-binaries
-	       :ffmpeg-bindings
+	       ;;:musical-binaries
+	       ;;:ffmpeg-bindings
 	       :bodge-sndfile
 	       :sndfile-blob
 	       :iterate
