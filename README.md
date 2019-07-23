@@ -16,6 +16,10 @@ FFMPEG supports a wide range of sound formats, but libsndfile is smaller and on 
 
 - `openal.lisp` sets up OpenAL for playing audio, as well as background threads for buffering audio data and polling OpenAL.
 
+```/musical-binaries/``` :
+
+- contains FFMPEG and OpenAL binaries for Mac, Windows 32-bit, Windows 64-bit, and linux.
+
 - Audio player is openal but a different backend could probably be used. 
 
 ## Bugs
